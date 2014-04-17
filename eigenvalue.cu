@@ -223,8 +223,32 @@ void init_sym_matrix(float *arr, int len, int seed) {
 
 void lanczos_on_host(float *mat, float *result, int len) {
   float *w_vec = (float *) malloc(len * sizeof(float));
+  float *v_vec = (float *) malloc(len * sizeof(float));
+  float *alpha_vec = (float *) malloc(len * sizeof(float));
+  float *beta_vec = (float *) malloc(len * sizeof(float));
   memset(w_vec, 0, sizeof(float) * len);
+  memset(v_vec, 0, sizeof(float) * len);
   w_vec[0] = 1;
+  beta_vec[0] = 1;
+
+  int k = 0;
+  int i;
+  float tmp;
+
+  while (beta_vec[k] != 0) {
+    if  (k != 0) {
+      for (i=0; i<len; i++) {
+        tmp = w_vec[i];
+        w_vec[i] = v_vec[i]/beta_vec[k];
+        v_vec[i] = -1 * beta_vec[k] * tmp;
+      }
+    }
+    //v = v + A.mult(w)
+    k++;
+    //alpha_vec[k] = (w transpose times v)
+    //v = v - alpha_vec[k]*w
+    // beta_vec[k] = norm of v_vec
+  }
 }
 
 struct timespec diff(struct timespec start, struct timespec end)
