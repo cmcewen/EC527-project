@@ -289,7 +289,7 @@ void lanczos_on_host(float *mat, int len) {
     vadd_Aw(v_vec, w_vec, mat, len);
     k++;
     //alpha_vec[k] = (w transpose times v)
-    alpha_vec[k] = wtr_v(w_vec, v_vec);
+    alpha_vec[k] = wtr_v(w_vec, v_vec, len);
     //v = v - alpha_vec[k]*w
     v_sub_alphaw(v_vec, w_vec, alpha_vec[k], len);
     // beta_vec[k] = norm of v_vec
@@ -298,11 +298,11 @@ void lanczos_on_host(float *mat, int len) {
 
   printf("\nalpha_vec: ");
   for (i=0; i<len; i++) {
-  	printf("%f, ", alpha_vec[i];
+  	printf("%f, ", alpha_vec[i]);
   }
   printf("\nbeta_vec: ");
   for (i=0; i<len; i++) {
-  	printf("%f, ", beta_vec[i];
+  	printf("%f, ", beta_vec[i]);
   }
 }
 
