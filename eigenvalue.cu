@@ -8,6 +8,8 @@
 #define CPG 2.533327           // Cycles per GHz -- Adjust to your computer
 
 // Assertion to check for errors
+
+/*
 #define CUDA_SAFE_CALL(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 {
@@ -17,6 +19,7 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 		if (abort) exit(code);
 	}
 }
+*/
 
 #define NUM_THREADS_PER_BLOCK 	256
 #define NUM_BLOCKS 				1
@@ -29,8 +32,10 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 #define IMUL(a, b) __mul24(a, b)
 
 void init_sym_matrix(float *arr, int len, int seed);
-void lanczos_on_host(float *mat, float *result, int Width);
+void lanczos_on_host(float *mat, int len);
 
+
+/*
 __global__ void kernel (float* Md, float* Nd, float *Pd, int Width) {
 	int Row = blockIdx.y*TILE_WIDTH + threadIdx.y;
   int Col = blockIdx.x*TILE_WIDTH + threadIdx.x;
@@ -41,6 +46,7 @@ __global__ void kernel (float* Md, float* Nd, float *Pd, int Width) {
 
   Pd[Row*Width+Col] = Pvalue;
 }
+*/
 
 int main(int argc, char **argv){
 
@@ -79,9 +85,13 @@ int main(int argc, char **argv){
 
 	// Allocate GPU memory
 	size_t allocSize = totalLen * sizeof(float);
+
+	/*
 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_m, allocSize));
   CUDA_SAFE_CALL(cudaMalloc((void **)&d_n, allocSize));
   CUDA_SAFE_CALL(cudaMalloc((void **)&d_p, allocSize));
+
+  */
 		
 	// Allocate arrays on host memory
 	h_mat = (float *) malloc(allocSize);
@@ -92,12 +102,14 @@ int main(int argc, char **argv){
 	init_sym_matrix(h_mat, arrLen, 1);
 	printf("\t... done\n\n");
 
-  for(i = 0; i<10; i++) {
-    for (j=0; j<10; j++) {
-		printf("%f, ",h_mat[i*10 + j]);
+  for(i = 0; i<ARR_LEN; i++) {
+    for (j=0; j<ARR_LEN; j++) {
+		printf("%f, ",h_mat[i*ARR_LEN + j]);
 	  }
     printf("\n");
   }
+
+  lanczos_on_host(h_mat, ARR_LEN);
 	
 	/*
 #if PRINT_TIME
@@ -192,7 +204,7 @@ int main(int argc, char **argv){
 	*/
 	free(h_mat);
 
-  cudaDeviceReset();
+  //cudaDeviceReset();
 
 		
 	return 0;
@@ -221,7 +233,37 @@ void init_sym_matrix(float *arr, int len, int seed) {
   free(transpose);
 }
 
-void lanczos_on_host(float *mat, float *result, int len) {
+void vadd_Aw (float *v, float *w, float *A, int len) {
+	for (int i=0; i<len; i++) {
+		for (int j=0; j<len; j++) {
+			v[i] += A[i*len + j] * w[j];
+		}
+	}
+}
+
+float wtr_v (float *w, float* v, int len) {
+	float sum = 0;
+	for (int i=0; i<len; i++) {
+		sum += w[i] * v[i];
+	}
+	return sum;
+}
+
+void v_sub_alphaw (float* v, float* w, float alphaK, int len) {
+	for (int i=0; i<len; i++) {
+		v[i] -= alphaK * w[i];
+	}
+}
+
+float vec_norm(float *vec, int len) {
+	float sum = 0;
+	for (int i=0; i<len; i++) {
+		sum += vec[i];
+	}
+	return sum;
+}
+
+void lanczos_on_host(float *mat, int len) {
   float *w_vec = (float *) malloc(len * sizeof(float));
   float *v_vec = (float *) malloc(len * sizeof(float));
   float *alpha_vec = (float *) malloc(len * sizeof(float));
@@ -244,10 +286,23 @@ void lanczos_on_host(float *mat, float *result, int len) {
       }
     }
     //v = v + A.mult(w)
+    vadd_Aw(v_vec, w_vec, mat, len);
     k++;
     //alpha_vec[k] = (w transpose times v)
+    alpha_vec[k] = wtr_v(w_vec, v_vec);
     //v = v - alpha_vec[k]*w
+    v_sub_alphaw(v_vec, w_vec, alpha_vec[k], len);
     // beta_vec[k] = norm of v_vec
+    beta_vec[k] = vec_norm(v_vec, len);
+  }
+
+  printf("\nalpha_vec: ");
+  for (i=0; i<len; i++) {
+  	printf("%f, ", alpha_vec[i];
+  }
+  printf("\nbeta_vec: ");
+  for (i=0; i<len; i++) {
+  	printf("%f, ", beta_vec[i];
   }
 }
 
