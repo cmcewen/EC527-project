@@ -109,7 +109,7 @@ int main(int argc, char **argv){
     printf("\n");
   }
 
-  lanczos_on_host(h_mat, ARR_LEN);
+  lanczos1_on_host(h_mat, ARR_LEN);
 	
 	/*
 #if PRINT_TIME
@@ -264,12 +264,10 @@ float vec_norm(float *vec, int len) {
 }
 
 void lanczos_on_host(float *mat, int len) {
-  float *w_vec = (float *) malloc(len * sizeof(float));
-  float *v_vec = (float *) malloc(len * sizeof(float));
+  float *w_vec = (float *) calloc(len * sizeof(float));
+  float *v_vec = (float *) calloc(len * sizeof(float));
   float *alpha_vec = (float *) malloc(len * sizeof(float));
   float *beta_vec = (float *) malloc(len * sizeof(float));
-  memset(w_vec, 0, sizeof(float) * len);
-  memset(v_vec, 0, sizeof(float) * len);
   w_vec[0] = 1;
   beta_vec[0] = 1;
 
@@ -286,13 +284,17 @@ void lanczos_on_host(float *mat, int len) {
       }
     }
     //v = v + A.mult(w)
+    printf("\nmult.add ");
     vadd_Aw(v_vec, w_vec, mat, len);
     k++;
     //alpha_vec[k] = (w transpose times v)
+    printf("\nwtr_v ");
     alpha_vec[k] = wtr_v(w_vec, v_vec, len);
     //v = v - alpha_vec[k]*w
+    printf("\nvsub");
     v_sub_alphaw(v_vec, w_vec, alpha_vec[k], len);
     // beta_vec[k] = norm of v_vec
+    printf("\nvec_norm");
     beta_vec[k] = vec_norm(v_vec, len);
   }
 
@@ -304,6 +306,63 @@ void lanczos_on_host(float *mat, int len) {
   for (i=0; i<len; i++) {
   	printf("%f, ", beta_vec[i]);
   }
+}
+
+float xt_x_mult(float *x, int len) {
+	float sum = 0;
+	for (int j=0; j<len; j++) {
+		sum += x[j] * x[len + j];
+	}
+	return sum;
+}
+
+void vec_mat_mult(float *x, float *mat, int len) {
+	for (int i=0; i<len; i++) {
+		x[len+i] = 0;
+		for (int j=0; j<len; j++) {
+			x[len+i] += mat[i*len + j] * x[i];
+		}
+	}
+}
+
+void lanczos1_on_host(float *mat, int len) {
+	float *x_vec = (float *) calloc(len * len * sizeof(float));
+	float *beta_vec = (float *) calloc(len * sizeof(float));
+	float *alpha_vec = (float *) calloc(len * sizeof(float));
+	int i = 1;
+	int j;
+	beta_vec[0] = 1;
+	beta_vec[1] = 1;
+
+	while (beta_vec[i] != 0) {
+		vec_mat_mult(x+len*(i-1), mat, len);
+		alpha_vec[i] = xt_x_mult(x + len*(i-1), len);
+		if (i > 1) {
+			for (j=0; j<len; j++) {
+				x[i*len + j] = x[i*len + j] - alpha_vec[i]*x[(i-1)*len + j];
+			}
+		}
+		if (i > 2) {
+			for (j=0; j<len; j++) {
+				x[i*len + j] = x[i*len + j] - beta_vec[i-1]*x[(i-2)*len + j];
+			}
+		}
+		beta_vec[i] = vec_norm(x_vec+len, len);
+		//div_beta();
+		for (j=0; j<len; j++) {
+			x[i*len + j] = x[i*len + j] / beta_vec[i];
+		}
+		i++;
+	}
+	printf("\nalpha_vec: ");
+  for (i=0; i<len; i++) {
+  	printf("%f, ", alpha_vec[i]);
+  }
+  printf("\nbeta_vec: ");
+  for (i=0; i<len; i++) {
+  	printf("%f, ", beta_vec[i]);
+  }
+
 }
 
 struct timespec diff(struct timespec start, struct timespec end)
