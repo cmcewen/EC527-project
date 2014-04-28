@@ -24,18 +24,19 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 #define NUM_THREADS_PER_BLOCK 	256
 #define NUM_BLOCKS 				1
 #define PRINT_TIME 				1
-#define ARR_LEN			  20
-#define SPARSE        7
+#define ARR_LEN			  15000
+#define SPARSE        7000
 #define TOL						1e-6
 #define TILE_WIDTH    20
 #define BLK_WIDTH     100
-#define EPSILON       1.11e-16
+#define UERROR       1.11e-16
 
 #define IMUL(a, b) __mul24(a, b)
 
 void init_sym_matrix(double *arr, int len, int seed);
-void lanczos_on_host(double *mat, int len);
+void lanczos_on_host(double *mat, double *eigs, int len);
 void lanczos1_on_host(double *mat, int len);
+void eigenvalues(double *alpha_vec, double* beta_vec, int num);
 
 
 /*
@@ -65,12 +66,16 @@ int main(int argc, char **argv){
 	double elapsed_gpu, elapsed_gpu1;
 	
 	// Arrays on GPU global memory
-	double *d_m;
-  double *d_n;
-  double *d_p;
+	double *d_mat;
+  double *d_alpha;
+  double *d_beta;
 
 	// Arrays on the host memory
 	double *h_mat;
+  double *h_alpha;
+  double *h_beta;
+  double *h_eigs1;
+  double *h_eigs2;
 
   double result;
 	
@@ -88,33 +93,34 @@ int main(int argc, char **argv){
 
 	// Allocate GPU memory
 	size_t allocSize = totalLen * sizeof(double);
-
-	/*
-	CUDA_SAFE_CALL(cudaMalloc((void **)&d_m, allocSize));
-  CUDA_SAFE_CALL(cudaMalloc((void **)&d_n, allocSize));
-  CUDA_SAFE_CALL(cudaMalloc((void **)&d_p, allocSize));
-
-  */
-		
+/*
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_mat, allocSize));
+  CUDA_SAFE_CALL(cudaMalloc((void **)&d_alpha, arrLen));
+  CUDA_SAFE_CALL(cudaMalloc((void **)&d_beta, arrLen));
+*/		
 	// Allocate arrays on host memory
 	h_mat = (double *) malloc(allocSize);
+  //h_alpha = (double *) malloc(arrLen);
+  //h_beta = (double *) malloc(arrLen);
+  h_eigs1 = (double *) malloc(arrLen/100);
+  //h_eigs2 = (double *) malloc(arrLen/100);
 	
 	// Initialize the host arrays
 	printf("\nInitializing the arrays ...");
 	// Arrays are initialized with a known seed for reproducability
-	init_sym_matrix(h_mat, arrLen, 2);
+	init_sym_matrix(h_mat, arrLen, 1);
 	printf("\t... done\n\n");
 
+  /*
   for(i = 0; i<ARR_LEN; i++) {
     for (j=0; j<ARR_LEN; j++) {
 		printf("%f ",h_mat[i*ARR_LEN + j]);
 	  }
     printf("\n");
   }
-
-  lanczos_on_host(h_mat, ARR_LEN);
+  */
 	
-	/*
+/*
 #if PRINT_TIME
 	// Create the cuda events
 	cudaEventCreate(&start);
@@ -126,8 +132,7 @@ int main(int argc, char **argv){
 #endif
 	
 	// Transfer the arrays to the GPU memory
-	CUDA_SAFE_CALL(cudaMemcpy(d_m, h_m, allocSize, cudaMemcpyHostToDevice));
-  CUDA_SAFE_CALL(cudaMemcpy(d_n, h_n, allocSize, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(d_mat, h_mat, allocSize, cudaMemcpyHostToDevice));
   
   dim3 dimBlock(TILE_WIDTH,TILE_WIDTH,1);
   dim3 dimGrid(BLK_WIDTH,BLK_WIDTH);
@@ -135,7 +140,7 @@ int main(int argc, char **argv){
   cudaEventRecord(start1, 0);
 	  
 	// Launch the kernel
-	kernel<<<dimGrid, dimBlock>>>(d_m, d_n, d_p, ARR_LEN);
+	kernel<<<dimGrid, dimBlock>>>(d_mat, d_alpha, d_beta, ARR_LEN);
 
 	// Check for errors during launch
 	CUDA_SAFE_CALL(cudaPeekAtLastError());
@@ -162,17 +167,16 @@ int main(int argc, char **argv){
 #endif
 	
 	// Compute the results on the host
-
+*/
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time1);
   
-  MatrixMulOnHost(h_m, h_n, h_p_test, ARR_LEN);
+  lanczos_on_host(h_mat, h_eigs1, ARR_LEN);
 
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
   time_stamp = diff(time1,time2);	
   printf("\nCPU time: %ld (nsec)", (long int)((double)(GIG * time_stamp.tv_sec + time_stamp.tv_nsec)));
-
-  double largestDif = 0;	
-  
+	
+  /*
 	// Compare the results
 	for(i = 0; i < totalLen; i++) {
 		if (abs(h_p_gpu[i] - h_p_test[i]) > .001 * h_p_test[i]) {
@@ -222,7 +226,8 @@ void init_sym_matrix(double *arr, int len, int seed) {
 
 	for (i=0; i<len; i++) {
     for (j=0; j<len; j++) {
-		  randNum = (j % SPARSE == 0) ? (double) rand() : 0;
+		  randNum = (j % SPARSE == 0) ? (double) (rand() % 100000000) : 0;
+      // randNum = (j % SPARSE == 0) ? (double) rand() : 0;
 		  arr[i*len+j] = randNum;
       transpose[j*len+i] = arr[i*len+j];
     }
@@ -236,7 +241,55 @@ void init_sym_matrix(double *arr, int len, int seed) {
   free(transpose);
 }
 
-void lanczos_on_host(double *mat, int len) {
+void eigenvalues(double *alpha_vec, double* beta_vec, double* eigs, int num) {
+  double *p_vals = (double *) malloc((num+1) * sizeof(double));
+  p_vals[0] = 1;
+
+  int j, i, changes;
+
+  double y1 = 0;
+  double z1 = 0;
+
+  for (i=1; i<=num; i++) {
+    if (alpha_vec[i] - abs(beta_vec[i]) - abs(beta_vec[i-1]) < y1) y1 = alpha_vec[i] - abs(beta_vec[i]) - abs(beta_vec[i-1]);
+    if (alpha_vec[i] + abs(beta_vec[i]) + abs(beta_vec[i-1]) > z1) z1 = alpha_vec[i] + abs(beta_vec[i]) + abs(beta_vec[i-1]);
+  }
+
+  for (i=1; i<=num; i++) {
+    double x;
+    double y = y1;
+    //printf("\ny = %f", y);
+    double z = z1;
+    //printf("\nz = %f", z);
+    while( abs(z-y) > UERROR*(abs(y) + abs(z))) {
+      x = (y+z)/2;
+      //printf("\nx = %f", x);
+      //calculate a
+      p_vals[1] = alpha_vec[1] - x;
+      for (j=2; j<=num; j++) {
+        p_vals[j] = (alpha_vec[j]-x)*p_vals[j-1]-beta_vec[j-1]*beta_vec[j-1]*p_vals[j-2];      
+      }
+      changes = 0;
+      //printf("\npvals = ");
+      for (j=1; j<=num; j++) {
+        //printf("%0.1f ", p_vals[j]);
+        if ((p_vals[j] > 0) && (p_vals[j-1] > 0));
+        else if ((p_vals[j] > 0) && (p_vals[j-1] < 0)) changes++;
+        else if ((p_vals[j] < 0) && (p_vals[j-1] < 0));
+        else if ((p_vals[j] < 0) && (p_vals[j-1] > 0)) changes++;
+        else if ((p_vals[j] == 0)) changes++;
+      }
+      //printf("\n i = %i, changes = %i", i, changes);
+      if (changes > num - i) z = x;
+      else y=x;
+    }
+    eigs[i] = x;
+    printf("\n eig %i = %f", i, x);
+  } 
+  printf("\n");
+}
+
+void lanczos_on_host(double *mat, double *eigs, int len) {
   double *w_vec = (double *) calloc(len, sizeof(double));
   double *v_vec = (double *) calloc(len, sizeof(double));
   double *alpha_vec = (double *) malloc(len * sizeof(double));
@@ -245,7 +298,7 @@ void lanczos_on_host(double *mat, int len) {
 
   int k = 0;
   int i, j;
-  double tmp;
+  double tmp, tmp0, tmp1, tmp2, tmp3;
 
   for (i=0; i<len; i++) {
     w_vec[i] = 1/sqrt(ARR_LEN);
@@ -262,37 +315,66 @@ void lanczos_on_host(double *mat, int len) {
     }
     //v = v + A.mult(w)
     for (i=0; i<len; i++) {
-		  for (j=0; j<len; j++) {
-			  v_vec[i] += mat[i*len + j] * w_vec[j];
+      tmp0 = tmp1 = tmp2 = tmp3 = 0;
+		  for (j=0; j<len; j+=4) {
+			  tmp0 += mat[i*len + j] * w_vec[j];
+			  tmp1 += mat[i*len + j+1] * w_vec[j+1];
+			  tmp2 += mat[i*len + j+2] * w_vec[j+2];
+			  tmp3 += mat[i*len + j+3] * w_vec[j+3];
 		  }
+      v_vec[i] += tmp0 + tmp1 + tmp2 + tmp3;
 	  }
     k++;
     //alpha_vec[k] = (w transpose times v)
 
-    alpha_vec[k] = 0;
-    for (i=0; i<len; i++) {
-		   alpha_vec[k] += w_vec[i] * v_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+    for (i=0; i<len; i+=4) {
+		   tmp0 += w_vec[i] * v_vec[i];
+		   tmp1 += w_vec[i+1] * v_vec[i+1];
+		   tmp2 += w_vec[i+2] * v_vec[i+2];
+		   tmp3 += w_vec[i+3] * v_vec[i+3];
 	  }
-    
+    alpha_vec[k] = tmp0 + tmp1 + tmp2 + tmp3;    
+
     //v = v - alpha_vec[k]*w
 
-    for (i=0; i<len; i++) {
-		  v_vec[i] -= alpha_vec[k] * w_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+    for (i=0; i<len; i+=4) {
+		  tmp0 += alpha_vec[k] * w_vec[i];
+		  tmp1 += alpha_vec[k+1] * w_vec[i+1];
+		  tmp2 += alpha_vec[k+2] * w_vec[i+2];
+		  tmp3 += alpha_vec[k+3] * w_vec[i+3];
 	  }
+    v_vec[i] -= tmp0 + tmp1 + tmp2 + tmp3;
 
     // beta_vec[k] = norm of v_vec
-    //beta_vec[k] = vec_norm(v_vec, len);
 
-    double sum = 0;
-	  for (i=0; i<len; i++) {
-		  sum += v_vec[i] * v_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+	  for (i=0; i<len; i+=4) {
+		  tmp0 += v_vec[i] * v_vec[i];
+		  tmp1 += v_vec[i+1] * v_vec[i+1];
+		  tmp2 += v_vec[i+2] * v_vec[i+2];
+		  tmp3 += v_vec[i+3] * v_vec[i+3];
 	  }
-	  beta_vec[k] = sqrt(sum);
+	  beta_vec[k] = sqrt(tmp0 + tmp1 + tmp2 + tmp3);
   }
 
-  beta_vec[k] = 0;
-  beta_vec[0] = 0; //for eigs compute
+  printf("\n final k = %i", k);
   
+  beta_vec[k] = 0;
+  beta_vec[0] = 0; //for eigs compute 
+
+  /*
+  printf("\n betavec = ");
+  for (j=0; j<len; j++) {
+    printf("%f, ", beta_vec[j]);
+  }
+  printf("\n alphavec = ");
+  for (j=0; j<len; j++) {
+    printf("%f, ", alpha_vec[j]);
+  }
+  */
+
   printf("\n%0.30f, %0.30f", alpha_vec[1], beta_vec[1]);
   for (j=0; j<k-2; j++) printf(", 0");
   printf("\n");
@@ -307,28 +389,9 @@ void lanczos_on_host(double *mat, int len) {
     }
     printf("\n");
   }
+
+  eigenvalues(alpha_vec, beta_vec, eigs, k);
 }
-
-void eigenvalues(double *alpha, double* beta, double* eigs, int num) {
-  double *p_vals = (double *) malloc(num * sizeof(double));
-  p_vals[0] = 1;
-
-
-  for (int i=1; i<=num; i++) {
-    p_vals[1] = alpha_vec[1]-i
-    for (int j=2; j<=num; j++) {
-      p_vals[j] = (alpha_vec[j]-i)*p_vals[j-1] - beta_vec[j-1]*beta_vec[j-1]*p_vals[j-2];
-    }
-    double x;
-    double y = alpha_vec[i] - abs(beta_vec[i]) - abs(beta_vec[i-1]);
-    double z = alpha_vec[i] + abs(beta_vec[i]) + abs(beta_vec[i-1]);
-    while( abs(z-y) > abs(y) + abs(z)) {
-      x = (y+z)/2;
-      if 
-}
-
-void aofx(double x, int r, double *alpha_vec, double* beta_vec, double p_1, double p_2) {
-  return (alpha_vec[r]-x)*p_1 - beta_vec[r-1]*beta_vec[r-1]*p_2;
 
 struct timespec diff(struct timespec start, struct timespec end)
 {
