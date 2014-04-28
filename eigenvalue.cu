@@ -25,7 +25,7 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 #define NUM_BLOCKS 				1
 #define PRINT_TIME 				1
 #define ARR_LEN			  15000
-#define SPARSE        3500
+#define SPARSE        7000
 #define TOL						1e-6
 #define TILE_WIDTH    20
 #define BLK_WIDTH     100
@@ -298,7 +298,7 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
 
   int k = 0;
   int i, j;
-  double tmp;
+  double tmp, tmp0, tmp1, tmp2, tmp3;
 
   for (i=0; i<len; i++) {
     w_vec[i] = 1/sqrt(ARR_LEN);
@@ -315,31 +315,48 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
     }
     //v = v + A.mult(w)
     for (i=0; i<len; i++) {
-		  for (j=0; j<len; j++) {
-			  v_vec[i] += mat[i*len + j] * w_vec[j];
+      tmp0 = tmp1 = tmp2 = tmp3 = 0;
+		  for (j=0; j<len; j+=4) {
+			  tmp0 += mat[i*len + j] * w_vec[j];
+			  tmp1 += mat[i*len + j+1] * w_vec[j+1];
+			  tmp2 += mat[i*len + j+2] * w_vec[j+2];
+			  tmp3 += mat[i*len + j+3] * w_vec[j+3];
 		  }
+      v_vec[i] += tmp0 + tmp1 + tmp2 + tmp3;
 	  }
     k++;
     //alpha_vec[k] = (w transpose times v)
 
-    alpha_vec[k] = 0;
-    for (i=0; i<len; i++) {
-		   alpha_vec[k] += w_vec[i] * v_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+    for (i=0; i<len; i+=4) {
+		   tmp0 += w_vec[i] * v_vec[i];
+		   tmp1 += w_vec[i+1] * v_vec[i+1];
+		   tmp2 += w_vec[i+2] * v_vec[i+2];
+		   tmp3 += w_vec[i+3] * v_vec[i+3];
 	  }
-    
+    alpha_vec[k] = tmp0 + tmp1 + tmp2 + tmp3;    
+
     //v = v - alpha_vec[k]*w
 
-    for (i=0; i<len; i++) {
-		  v_vec[i] -= alpha_vec[k] * w_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+    for (i=0; i<len; i+=4) {
+		  tmp0 += alpha_vec[k] * w_vec[i];
+		  tmp1 += alpha_vec[k+1] * w_vec[i+1];
+		  tmp2 += alpha_vec[k+2] * w_vec[i+2];
+		  tmp3 += alpha_vec[k+3] * w_vec[i+3];
 	  }
+    v_vec[i] -= tmp0 + tmp1 + tmp2 + tmp3;
 
     // beta_vec[k] = norm of v_vec
 
-    double sum = 0;
-	  for (i=0; i<len; i++) {
-		  sum += v_vec[i] * v_vec[i];
+    tmp0 = tmp1 = tmp2 = tmp3 = 0;
+	  for (i=0; i<len; i+=4) {
+		  tmp0 += v_vec[i] * v_vec[i];
+		  tmp1 += v_vec[i+1] * v_vec[i+1];
+		  tmp2 += v_vec[i+2] * v_vec[i+2];
+		  tmp3 += v_vec[i+3] * v_vec[i+3];
 	  }
-	  beta_vec[k] = sqrt(sum);
+	  beta_vec[k] = sqrt(tmp0 + tmp1 + tmp2 + tmp3);
   }
 
   printf("\n final k = %i", k);
