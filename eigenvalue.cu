@@ -24,8 +24,8 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort=true)
 #define NUM_THREADS_PER_BLOCK 	256
 #define NUM_BLOCKS 				1
 #define PRINT_TIME 				1
-#define ARR_LEN			  15000
-#define SPARSE        7000
+#define ARR_LEN			  10000
+#define SPARSE        3000
 #define TOL						1e-6
 #define TILE_WIDTH    20
 #define BLK_WIDTH     100
@@ -60,6 +60,7 @@ int main(int argc, char **argv){
 
 	int arrLen = 0;
   int totalLen = 0;
+/*
 		
 	// GPU Timing variables
 	cudaEvent_t start, stop, start1, stop1;
@@ -69,7 +70,7 @@ int main(int argc, char **argv){
 	double *d_mat;
   double *d_alpha;
   double *d_beta;
-
+*/
 	// Arrays on the host memory
 	double *h_mat;
   double *h_alpha;
@@ -174,7 +175,7 @@ int main(int argc, char **argv){
 
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
   time_stamp = diff(time1,time2);	
-  printf("\nCPU time: %ld (nsec)", (long int)((double)(GIG * time_stamp.tv_sec + time_stamp.tv_nsec)));
+  printf("\nCPU time: %ld (nsec)\n", (long int)((double)(GIG * time_stamp.tv_sec + time_stamp.tv_nsec)));
 	
   /*
 	// Compare the results
@@ -226,7 +227,7 @@ void init_sym_matrix(double *arr, int len, int seed) {
 
 	for (i=0; i<len; i++) {
     for (j=0; j<len; j++) {
-		  randNum = (j % SPARSE == 0) ? (double) (rand() % 100000000) : 0;
+		  randNum = (j % SPARSE == 0) ? (double) (rand() % 100000) : 0;
       // randNum = (j % SPARSE == 0) ? (double) rand() : 0;
 		  arr[i*len+j] = randNum;
       transpose[j*len+i] = arr[i*len+j];
@@ -249,6 +250,7 @@ void eigenvalues(double *alpha_vec, double* beta_vec, double* eigs, int num) {
 
   double y1 = 0;
   double z1 = 0;
+  double x, y, z;
 
   for (i=1; i<=num; i++) {
     if (alpha_vec[i] - abs(beta_vec[i]) - abs(beta_vec[i-1]) < y1) y1 = alpha_vec[i] - abs(beta_vec[i]) - abs(beta_vec[i-1]);
@@ -256,10 +258,9 @@ void eigenvalues(double *alpha_vec, double* beta_vec, double* eigs, int num) {
   }
 
   for (i=1; i<=num; i++) {
-    double x;
-    double y = y1;
+    y = y1;
     //printf("\ny = %f", y);
-    double z = z1;
+    (i ==1) ? z = z1 : z = eigs[i-1]+1;
     //printf("\nz = %f", z);
     while( abs(z-y) > UERROR*(abs(y) + abs(z))) {
       x = (y+z)/2;
@@ -298,19 +299,20 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
 
   int k = 0;
   int i, j;
-  double tmp, tmp0, tmp1, tmp2, tmp3;
+  double tmp, b, tmp0, tmp1, tmp2, tmp3;
 
   for (i=0; i<len; i++) {
     w_vec[i] = 1/sqrt(ARR_LEN);
   }
 
   while (abs(beta_vec[k]) > 100 || k==0 ) {
-    printf("\nit start = %i", k);
+    //printf("\nit start = %i", k);
     if  (k != 0) {
+      b = beta_vec[k];
       for (i=0; i<=len; i++) {
         tmp = w_vec[i];
-        w_vec[i] = v_vec[i]/beta_vec[k];
-        v_vec[i] = -1 * beta_vec[k] * tmp;
+        w_vec[i] = v_vec[i]/b;
+        v_vec[i] = -1 * b * tmp;
       }
     }
     //v = v + A.mult(w)
@@ -329,7 +331,7 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
 
     tmp0 = tmp1 = tmp2 = tmp3 = 0;
     for (i=0; i<len; i+=4) {
-		   tmp0 += w_vec[i] * v_vec[i];
+		   tmp0 += w_vec[i] * v_vec[i]; 
 		   tmp1 += w_vec[i+1] * v_vec[i+1];
 		   tmp2 += w_vec[i+2] * v_vec[i+2];
 		   tmp3 += w_vec[i+3] * v_vec[i+3];
@@ -351,7 +353,7 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
 
     tmp0 = tmp1 = tmp2 = tmp3 = 0;
 	  for (i=0; i<len; i+=4) {
-		  tmp0 += v_vec[i] * v_vec[i];
+		  tmp0 += v_vec[i] * v_vec[i]; 
 		  tmp1 += v_vec[i+1] * v_vec[i+1];
 		  tmp2 += v_vec[i+2] * v_vec[i+2];
 		  tmp3 += v_vec[i+3] * v_vec[i+3];
@@ -391,6 +393,7 @@ void lanczos_on_host(double *mat, double *eigs, int len) {
   }
 
   eigenvalues(alpha_vec, beta_vec, eigs, k);
+  printf("\n");
 }
 
 struct timespec diff(struct timespec start, struct timespec end)
